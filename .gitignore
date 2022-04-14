@@ -128,6 +128,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-#ignore large datasets
+# ignore large datasets
 datasets/compute/*.csv
 datasets/raw/*.csv
+
+# ignore pickle files
+src/models/*.pkl
