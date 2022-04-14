@@ -198,15 +198,19 @@ def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df
             'reg_alpha': [0, 1e-1, 1, 2, 5, 7, 10, 50, 100],
             'reg_lambda': [0, 1e-1, 1, 2, 5, 7, 10, 50, 100]
         }
-        classifier = lgb.LGBMClassifier(max_depth=1, random_state=314, n_estimators=1000)
-        grid = GridSearchCV(estimator = classifier,
-                            param_grid= params,
-                            cv=5,
-                            n_jobs=4)
 
-        grid.fit(df_train_split, df_train_split_target)
+        params = {'colsample_bytree': 0.9234, 'min_child_samples': 399, 'min_child_weight': 0.1, 'num_leaves': 13, 'reg_alpha': 2, 'reg_lambda': 5, 'subsample': 0.855}
 
-        lgbm = grid.best_estimator_
+        classifier = lgb.LGBMClassifier(max_depth=1, random_state=314, n_estimators=1000, **params)
+        # grid = GridSearchCV(estimator= classifier,
+        #                     param_grid= params,
+        #                     cv=5,
+        #                     n_jobs=4)
+        #
+        # grid.fit(df_train_split, df_train_split_target)
+        classifier.fit(df_train_split, df_train_split_target)
+        # lgbm = grid.best_estimator_
+        lgbm = classifier
         log.info(f"Pickle classifier to src/models/lgbm_undersample.pkl")
         with open('src/models/lgbm_undersample.pkl', 'wb') as f:
             pickle.dump(lgbm, f)
