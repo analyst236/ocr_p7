@@ -8,6 +8,7 @@ from sklearn import metrics
 from sklearn.model_selection import train_test_split, GridSearchCV
 from src.transformers import MetaTransformer
 from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import SMOTE
 from scipy.stats import randint, uniform
 import lightgbm as lgb
 import pickle
@@ -60,6 +61,8 @@ def merge_raw_datasets(compute_folder_path, raw_df_dict=None):
         merged_raw_df_test
     """
 
+    ## We are using only application_train.csv in this version
+    ## But merging strategy can go here
     if raw_df_dict is not None:
         log.info(f"Merging raw datasource")
         merged_raw_df_train = raw_df_dict['application_train.csv']
@@ -116,31 +119,43 @@ def transform_data(raw_df_train_split, raw_df_eval_split, merged_raw_df_test, co
 
     if data_not_precomputed:
         log.info("Fit Transformers")
+        ## extract ID and target from datasets
+        train_split_id = raw_df_train_split['SK_ID_CURR']
+        raw_df_train_split.drop('SK_ID_CURR', inplace=True, axis=1)
         transform_df_train_split_target = raw_df_train_split['TARGET']
         raw_df_train_split.drop('TARGET', inplace=True, axis=1)
 
+        eval_split_id = raw_df_eval_split['SK_ID_CURR']
+        raw_df_eval_split.drop('SK_ID_CURR', inplace=True, axis=1)
         transform_df_eval_split_target = raw_df_eval_split['TARGET']
         raw_df_eval_split.drop('TARGET', inplace=True, axis=1)
 
+        test_split_id = merged_raw_df_test['SK_ID_CURR']
+        merged_raw_df_test.drop('SK_ID_CURR', inplace=True, axis=1)
+
+        ## transform raw data
         transformer_pipeline = MetaTransformer(verbose=conf.TRANSFORMER_VERBOSITY)
         log.info(f" train shape : {raw_df_train_split.shape}")
 
         transformer_pipeline.fit(raw_df_train_split, transform_df_train_split_target)
 
-        # TODO : save fitted transformer as pickle for later
         log.info(f"Pickle transformer pipeline to src/models/transformer_pipeline.pkl")
         with open('src/models/transformer_pipeline.pkl', 'wb') as f:
             pickle.dump(transformer_pipeline, f)
 
+        log.info(f"Transfom and save datasets: train, eval, test")
         transform_df_train_split = transformer_pipeline.transform(raw_df_train_split)
+        transform_df_train_split['SK_ID_CURR'] = train_split_id
         transform_df_train_split.to_csv(f"{compute_data_path}/transform_df_train_split.csv", index=False)
         transform_df_train_split_target.to_csv(f"{compute_data_path}/transform_df_train_split_target.csv", index=False)
         
         transform_df_eval_split = transformer_pipeline.transform(raw_df_eval_split)
+        transform_df_eval_split['SK_ID_CURR'] = eval_split_id
         transform_df_eval_split.to_csv(f"{compute_data_path}/transform_df_eval_split.csv", index=False)
         transform_df_eval_split_target.to_csv(f"{compute_data_path}/transform_df_eval_split_target.csv", index=False)
         
         transform_df_test = transformer_pipeline.transform(merged_raw_df_test)
+        transform_df_test['SK_ID_CURR'] = test_split_id
         transform_df_test.to_csv(f"{compute_data_path}/transform_df_test.csv", index=False)
         
     else:
@@ -162,25 +177,44 @@ def transform_data(raw_df_train_split, raw_df_eval_split, merged_raw_df_test, co
     return transform_df_train_split, transform_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target, transform_df_test
 
 
-def balance_data(transform_df_train_split, transform_df_train_split_target, compute_data_path):
+def balance_data(transform_df_train_split, transform_df_train_split_target, compute_data_path, method='under'):
     computed_files = glob.glob(compute_data_path + "/*.csv")
     data_not_precomputed = 'undersample_df_train_split.csv' not in [os.path.basename(fname) for fname in computed_files]
 
     if data_not_precomputed:
         log.info("Balance df_train_split")
+        log.info("Make Under_Sampling")
         random_under_sampler = RandomUnderSampler()
         undersample_df_train_split, undersample_df_train_split_target = random_under_sampler.fit_resample(transform_df_train_split, transform_df_train_split_target)
         undersample_df_train_split.to_csv(f"{compute_data_path}/undersample_df_train_split.csv", index=False)
         undersample_df_train_split_target.to_csv(f"{compute_data_path}/undersample_df_train_split_target.csv", index=False)
+
+        log.info("Make Over_Sampling")
+        over_sampler = SMOTE()
+        overersample_df_train_split, oversample_df_train_split_target = over_sampler.fit_resample( transform_df_train_split, transform_df_train_split_target)
+        overersample_df_train_split.to_csv(f"{compute_data_path}/overersample_df_train_split.csv", index=False)
+        oversample_df_train_split_target.to_csv(f"{compute_data_path}/oversample_df_train_split_target.csv", index=False)
+
+        if method == 'under':
+            df_train_split = undersample_df_train_split
+            df_train_split_target = undersample_df_train_split_target
+        else:
+            df_train_split = overersample_df_train_split
+            df_train_split_target = oversample_df_train_split_target
+
     else:
         log.info("Balance pre-computed - loading data from files")
-        undersample_df_train_split = pd.read_csv(f"{compute_data_path}/undersample_df_train_split.csv")
-        undersample_df_train_split_target = pd.read_csv(f"{compute_data_path}/undersample_df_train_split_target.csv")
+        if method == 'under':
+            df_train_split = pd.read_csv(f"{compute_data_path}/undersample_df_train_split.csv")
+            df_train_split_target = pd.read_csv(f"{compute_data_path}/undersample_df_train_split_target.csv")
+        else:
+            df_train_split = pd.read_csv(f"{compute_data_path}/overersample_df_train_split.csv")
+            df_train_split_target = pd.read_csv(f"{compute_data_path}/oversample_df_train_split_target.csv")
     
-    log.info(f"undersample_df_train_split - shape{undersample_df_train_split.shape}")
-    log.info(f"undersample_df_train_split_target - shape{undersample_df_train_split_target.shape}")
+    log.info(f"balance_df_train_split - shape{df_train_split.shape}")
+    log.info(f"balance_df_train_split_target - shape{df_train_split_target.shape}")
     
-    return undersample_df_train_split, undersample_df_train_split_target
+    return df_train_split, df_train_split_target
 
 
 def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df_eval_split_target):
@@ -252,8 +286,8 @@ if __name__ == '__main__':
     transform_df_train_split, transform_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target, transform_df_test = transform_data(raw_df_train_split, raw_df_eval_split, merged_raw_df_test, compute_data_path)
 
     # generate balanced train_datasets + save as .csv
-    undersample_df_train_split, undersample_df_train_split_target = balance_data(transform_df_train_split, transform_df_train_split_target, compute_data_path)
+    balanced_df_train_split, balanced_df_train_split_target = balance_data(transform_df_train_split, transform_df_train_split_target, compute_data_path, method='over')
     
     
     # fit model on balanced datasets + save bests models as pickle
-    fit_and_save_models(undersample_df_train_split, undersample_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target)
+    fit_and_save_models(balanced_df_train_split, balanced_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target)
