@@ -12,7 +12,8 @@ from imblearn.over_sampling import SMOTE
 from scipy.stats import randint, uniform
 import lightgbm as lgb
 import pickle
-
+import warnings
+warnings.filterwarnings('ignore')
 
 logging.config.fileConfig('logging.conf')
 
@@ -217,40 +218,58 @@ def balance_data(transform_df_train_split, transform_df_train_split_target, comp
     return df_train_split, df_train_split_target
 
 
-def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df_eval_split_target):
+def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df_eval_split_target, name='lgbm.pkl', class_weight=False):
     computed_files = glob.glob("src/models/*.pkl")
-    data_not_precomputed = 'lgbm_undersample.pkl' not in [os.path.basename(fname) for fname in computed_files]
+    data_not_precomputed = name not in [os.path.basename(fname) for fname in computed_files]
 
     if data_not_precomputed:
         log.info("Fitting model from undersample dataset")
         params = {
-            'num_leaves': [3, 6, 8, 10, 12, 24],
-            'min_child_samples' : [100, 200, 300, 500, 800],
-            'min_child_weight' : [1e-5, 1e-3, 1e-2, 1e-1, 1, 1e1, 1e2, 1e3, 1e4],
-            'subsample' : [0.2, 0.3, 0.4, 0.5, 0.8],
-            'colsample_bytree': [0.4, 0.5, 0.6],
-            'reg_alpha': [0, 1e-1, 1, 2, 5, 7, 10, 50, 100],
-            'reg_lambda': [0, 1e-1, 1, 2, 5, 7, 10, 50, 100]
+            'max_depth': [1, 5],
+            'n_estimators': [1000],
+            'num_leaves': [10, 17, 24],
+            'min_child_samples': [500],
+            'min_child_weight': [1e-1, 1, 1e1, 1e2],
+            'subsample': [0.8, 1],
+            'colsample_bytree': [0.9],
+            'reg_alpha': [2],
+            'reg_lambda': [5]
         }
 
-        params = {'colsample_bytree': 0.9234, 'min_child_samples': 399, 'min_child_weight': 0.1, 'num_leaves': 13, 'reg_alpha': 2, 'reg_lambda': 5, 'subsample': 0.855}
+        # params = {'max_depth': 1, 'n_estimators': 1000, 'colsample_bytree': 0.9234, 'min_child_samples': 399, 'min_child_weight': 0.1, 'num_leaves': 13, 'reg_alpha': 2, 'reg_lambda': 5, 'subsample': 0.855}
 
-        classifier = lgb.LGBMClassifier(max_depth=1, random_state=314, n_estimators=1000, **params)
-        # grid = GridSearchCV(estimator= classifier,
-        #                     param_grid= params,
-        #                     cv=5,
-        #                     n_jobs=4)
-        #
-        # grid.fit(df_train_split, df_train_split_target)
-        classifier.fit(df_train_split, df_train_split_target)
-        # lgbm = grid.best_estimator_
-        lgbm = classifier
-        log.info(f"Pickle classifier to src/models/lgbm_undersample.pkl")
-        with open('src/models/lgbm_undersample.pkl', 'wb') as f:
+        if class_weight:
+            print(df_train_split_target.value_counts())
+            count_class_1 = df_train_split_target.value_counts()[0]
+            count_class_2 = df_train_split_target.value_counts()[1]
+            ratio = count_class_1 / count_class_2
+            log.info(f"fir model with class_weight ratio = {ratio}")
+            classifier = lgb.LGBMClassifier(random_state=314, class_weight={1:ratio, 0:1}, **params)
+        else:
+            classifier = lgb.LGBMClassifier(random_state=314, **params)
+
+        fbeta_scorer = metrics.make_scorer(metrics.fbeta_score, greater_is_better=True, beta=2)
+
+        grid = GridSearchCV(estimator=classifier,
+                            param_grid=params,
+                            cv=5,
+                            n_jobs=4,
+                            scoring=fbeta_scorer)
+
+        grid.fit(df_train_split, df_train_split_target)
+
+
+        lgbm = grid.best_estimator_
+
+        # classifier.fit(df_train_split, df_train_split_target)
+        # lgbm = classifier
+
+        log.info(f"Pickle classifier to src/models/"+name)
+        with open(f'src/models/{name}', 'wb') as f:
             pickle.dump(lgbm, f)
     else:
         log.info("Model pre-fitted - loading from saved files")
-        with open('src/models/lgbm_undersample.pkl', 'rb') as f:
+        with open(f'src/models/{name}', 'rb') as f:
             lgbm = pickle.load(f)
 
     predicted = lgbm.predict(df_eval_split)
@@ -286,8 +305,30 @@ if __name__ == '__main__':
     transform_df_train_split, transform_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target, transform_df_test = transform_data(raw_df_train_split, raw_df_eval_split, merged_raw_df_test, compute_data_path)
 
     # generate balanced train_datasets + save as .csv
+    log.info("Compute oversampling model fitting")
     balanced_df_train_split, balanced_df_train_split_target = balance_data(transform_df_train_split, transform_df_train_split_target, compute_data_path, method='over')
     
-    
     # fit model on balanced datasets + save bests models as pickle
-    fit_and_save_models(balanced_df_train_split, balanced_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target)
+    fit_and_save_models(balanced_df_train_split, balanced_df_train_split_target, transform_df_eval_split, transform_df_eval_split_target, name='lgbm_oversample.pkl')
+
+
+
+    # generate balanced train_datasets + save as .csv
+    log.info("Compute undersampling model fitting")
+    balanced_df_train_split, balanced_df_train_split_target = balance_data(transform_df_train_split,
+                                                                           transform_df_train_split_target,
+                                                                           compute_data_path, method='under')
+
+    # fit model on balanced datasets + save bests models as pickle
+    fit_and_save_models(balanced_df_train_split, balanced_df_train_split_target, transform_df_eval_split,
+                        transform_df_eval_split_target, name='lgbm_undersample.pkl')
+
+    # fit model on balanced datasets + save bests models as pickle
+
+    log.info("Compute class_weight model fitting")
+    fit_and_save_models(transform_df_train_split, transform_df_train_split_target, transform_df_eval_split,
+                        transform_df_eval_split_target, name='lgbm_weight.pkl', class_weight=True)
+
+    log.info("Compute base model fitting")
+    fit_and_save_models(transform_df_train_split, transform_df_train_split_target, transform_df_eval_split,
+                        transform_df_eval_split_target, name='lgbm_nobalance.pkl', class_weight=False)
