@@ -236,7 +236,7 @@ def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df
             'reg_lambda': [5]
         }
 
-        # params = {'max_depth': 1, 'n_estimators': 1000, 'colsample_bytree': 0.9234, 'min_child_samples': 399, 'min_child_weight': 0.1, 'num_leaves': 13, 'reg_alpha': 2, 'reg_lambda': 5, 'subsample': 0.855}
+        params = {'max_depth': 1, 'n_estimators': 1000, 'colsample_bytree': 0.9234, 'min_child_samples': 399, 'min_child_weight': 0.1, 'num_leaves': 13, 'reg_alpha': 2, 'reg_lambda': 5, 'subsample': 0.855}
 
         if class_weight:
             print(df_train_split_target.value_counts())
@@ -248,21 +248,21 @@ def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df
         else:
             classifier = lgb.LGBMClassifier(random_state=314, **params)
 
-        fbeta_scorer = metrics.make_scorer(metrics.fbeta_score, greater_is_better=True, beta=2)
+        # fbeta_scorer = metrics.make_scorer(metrics.fbeta_score, greater_is_better=True, beta=2)
+        #
+        # grid = GridSearchCV(estimator=classifier,
+        #                     param_grid=params,
+        #                     cv=5,
+        #                     n_jobs=4,
+        #                     scoring=fbeta_scorer)
+        #
+        # grid.fit(df_train_split, df_train_split_target)
 
-        grid = GridSearchCV(estimator=classifier,
-                            param_grid=params,
-                            cv=5,
-                            n_jobs=4,
-                            scoring=fbeta_scorer)
 
-        grid.fit(df_train_split, df_train_split_target)
+        # lgbm = grid.best_estimator_
 
-
-        lgbm = grid.best_estimator_
-
-        # classifier.fit(df_train_split, df_train_split_target)
-        # lgbm = classifier
+        classifier.fit(df_train_split, df_train_split_target)
+        lgbm = classifier
 
         log.info(f"Pickle classifier to src/models/"+name)
         with open(f'src/models/{name}', 'wb') as f:
