@@ -224,17 +224,17 @@ def fit_and_save_models(df_train_split, df_train_split_target, df_eval_split, df
 
     if data_not_precomputed:
         log.info("Fitting model from undersample dataset")
-        params = {
-            'max_depth': [1, 5],
-            'n_estimators': [1000],
-            'num_leaves': [10, 17, 24],
-            'min_child_samples': [500],
-            'min_child_weight': [1e-1, 1, 1e1, 1e2],
-            'subsample': [0.8, 1],
-            'colsample_bytree': [0.9],
-            'reg_alpha': [2],
-            'reg_lambda': [5]
-        }
+        # params = {
+        #     'max_depth': [1, 5],
+        #     'n_estimators': [1000],
+        #     'num_leaves': [10, 17, 24],
+        #     'min_child_samples': [500],
+        #     'min_child_weight': [1e-1, 1, 1e1, 1e2],
+        #     'subsample': [0.8, 1],
+        #     'colsample_bytree': [0.9],
+        #     'reg_alpha': [2],
+        #     'reg_lambda': [5]
+        # }
 
         params = {'max_depth': 1, 'n_estimators': 1000, 'colsample_bytree': 0.9234, 'min_child_samples': 399, 'min_child_weight': 0.1, 'num_leaves': 13, 'reg_alpha': 2, 'reg_lambda': 5, 'subsample': 0.855}
 
