@@ -1,17 +1,16 @@
 import pandas as pd
 import settings as conf
-import logging
 import logging.config
 import os
 import glob
 from sklearn import metrics
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from src.transformers import MetaTransformer
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import SMOTE
-from scipy.stats import randint, uniform
 import lightgbm as lgb
 import pickle
+import shap
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -332,3 +331,15 @@ if __name__ == '__main__':
     log.info("Compute base model fitting")
     fit_and_save_models(transform_df_train_split, transform_df_train_split_target, transform_df_eval_split,
                         transform_df_eval_split_target, name='lgbm_nobalance.pkl', class_weight=False)
+
+
+    # save shap_values for explanation
+
+    # model = pickle.load(open(f"{conf.MODEL_PATH}/lgbm_undersample.pkl", 'rb'))
+    # test_data = pd.read_csv(f"{conf.COMPUTE_DATA_PATH}/transform_df_test.csv")
+    #
+    # explainer = shap.Explainer(model, test_data)
+    # shap_values = explainer(test_data)
+    #
+    # with open('src/models/lgbm_undersample_shap_values.pkl', 'wb') as f:
+    #     pickle.dump(shap_values, f)

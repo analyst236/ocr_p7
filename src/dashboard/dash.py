@@ -14,7 +14,8 @@ import plotly
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.figure_factory as ff
-import settings as conf
+
+#import settings as conf
 
 st.set_page_config(
     page_title="Score Credit Dashboard",
@@ -22,25 +23,26 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# API_BASE_URL = "http://ec2-35-181-58-38.eu-west-3.compute.amazonaws.com:8000"
-
+API_BASE_URL = "http://localhost:8000"
+MODEL_PATH = "../models"
+COMPUTE_DATA_PATH = "../../datasets/compute"
 
 @st.cache
 def load_all_customers_id():
-    id_list = requests.get(f"{conf.API_BASE_URL}/customers")
+    id_list = requests.get(f"{API_BASE_URL}/customers")
     return id_list.json()
 
 
 @st.cache
 def get_customer_info_df(customer_id):
-    customer = requests.get(f"{conf.API_BASE_URL}/detail/{customer_id}")
+    customer = requests.get(f"{API_BASE_URL}/detail/{customer_id}")
 
     return pd.DataFrame(customer.json()['raw']), pd.DataFrame(customer.json()['processed'])
 
 
 @st.cache
 def get_population_df():
-    population = requests.get(f"{conf.API_BASE_URL}/population")
+    population = requests.get(f"{API_BASE_URL}/population")
 
     return pd.DataFrame(population.json()['raw_population']).replace('NAN', np.nan)
 
@@ -48,7 +50,7 @@ def get_population_df():
 @st.cache
 def get_customer_prediction(customer_data):
     customer_details = customer_data.fillna('NAN').to_dict('list')
-    prediction = requests.post(f"{conf.API_BASE_URL}/predict",
+    prediction = requests.post(f"{API_BASE_URL}/predict",
                                data=json.dumps({'data': customer_details}))
     print(prediction.json())
     return prediction.json()
@@ -56,7 +58,7 @@ def get_customer_prediction(customer_data):
 
 @st.cache()
 def get_chart_data(feature_name, customer_id):
-    return requests.post(f"{conf.API_BASE_URL}/chart",
+    return requests.post(f"{API_BASE_URL}/chart",
                          data=json.dumps({'customer_id': customer_id, 'feature': feature_name}))
 
 
@@ -96,16 +98,31 @@ def get_chart(feature_name, customer_id, max_limit):
         plt.ylabel(feature_name[1])
     return fig
 
-
 @st.cache()
-def load_shap(customer_id):
-    model = pickle.load(open(f"{conf.MODEL_PATH}/lgbm_undersample.pkl", 'rb'))
-    test_data = pd.read_csv(f"{conf.COMPUTE_DATA_PATH}/transform_df_test.csv")
-    explainer = shap.Explainer(model)
+def load_model_explainer():
+    model = pickle.load(open(f"{MODEL_PATH}/lgbm_undersample.pkl", 'rb'))
+    test_data = pd.read_csv(f"{COMPUTE_DATA_PATH}/transform_df_test.csv")
+
+    explainer = shap.TreeExplainer(model)
+    #shap_values = pickle.load(open(f"{MODEL_PATH}/lgbm_undersample_shap_values.pkl", 'rb'))
+
     shap_values = explainer(test_data)
 
-    customer_index = test_data.index[test_data['SK_ID_CURR'] == customer_id].tolist()[0]
-    return shap_values[customer_index]
+    return test_data, shap_values
+
+
+def load_shap(customer_id):
+    model = pickle.load(open(f"{MODEL_PATH}/lgbm_undersample.pkl", 'rb'))
+    test_data = pd.read_csv(f"{COMPUTE_DATA_PATH}/transform_df_test.csv")
+
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer(test_data[test_data['SK_ID_CURR'] == customer_id])
+
+    #test_data, shap_values = load_model_explainer()
+
+    #customer_index = test_data.index[test_data['SK_ID_CURR'] == customer_id].tolist()[0]
+    #return shap_values[customer_index]
+    return shap_values, explainer, test_data.columns
 
 
 # Title.
@@ -132,13 +149,14 @@ g_info = st.columns(4)
 g_info[0].metric("revenus", f"{customer_df_raw['AMT_INCOME_TOTAL'][0]:.0f} $", delta=None, delta_color="normal")
 g_info[1].metric("montant du bien", f"{customer_df_raw['AMT_GOODS_PRICE'][0]:.0f} $", delta=None, delta_color="normal")
 g_info[2].metric("credit", f"{customer_df_raw['AMT_CREDIT'][0]:.0f} $", delta=None, delta_color="normal")
-g_info[3].metric("annuitÃ©s", f"{customer_df_raw['AMT_ANNUITY'][0]:.0f} $", delta=None, delta_color="normal")
+g_info[3].metric("annuités", f"{customer_df_raw['AMT_ANNUITY'][0]:.0f} $", delta=None, delta_color="normal")
 
 #### graphiques ####
 
 # SHAP Explanation
-shap_values = load_shap(customer_id)
-st_shap(shap.plots.waterfall(shap_values), height=500)
+shap_values, explainer, feature_names = load_shap(customer_id)
+st_shap(shap.plots._waterfall.waterfall_legacy(explainer.expected_value[0],shap_values[0].values[:,0],
+                                        feature_names=feature_names), height=500)
 
 # Graph Income/Credit & Days Employed.
 if 'population' not in st.session_state:
@@ -155,10 +173,15 @@ def plot_1():
     mask_1 = (df['AMT_INCOME_TOTAL'] <= income_client + percent_income_client)
     mask_2 = (df['AMT_INCOME_TOTAL'] >= income_client - percent_income_client)
 
-    fig = make_subplots(rows=2, cols=1, subplot_titles=("Income & Credits", "Days Employed"))
+    q_low = df["DAYS_EMPLOYED"].quantile(0.01)
+    q_hi = df["DAYS_EMPLOYED"].quantile(0.99)
+    mask_3 = (df["DAYS_EMPLOYED"] < q_hi)
+    mask_4 = (df["DAYS_EMPLOYED"] > q_low)
+
+    fig = make_subplots(rows=1, cols=1, subplot_titles=("Credits amount"))
 
     trace0 = go.Histogram(x=df[mask_1 & mask_2]['AMT_CREDIT'],
-                          name='Income & Credit',
+                          name='Credits amount',
                           xbins=dict(size=100000),
                           histnorm='percent',
                           marker_color='#EB89B5')
@@ -167,37 +190,36 @@ def plot_1():
                                y=[0, 20], mode="lines", name="Client's credit",
                                line=go.scatter.Line(color="red"))
 
-    trace1 = go.Histogram(x=-df['DAYS_EMPLOYED'],
-                          name='Days Employed',
-                          xbins=dict(size=500),
-                          marker_color='#37AA9C',
-                          histnorm='percent')
-
-    trace1_client = go.Scatter(x=[int(customer_df_raw['DAYS_EMPLOYED']), int(customer_df_raw['DAYS_EMPLOYED'])],
-                               mode="lines", y=[0, 14.5],
-                               line=go.scatter.Line(color="black"), name="Client's days employed")
+    # trace1 = go.Histogram(x=-df[mask_3 & mask_4]['DAYS_EMPLOYED'],
+    #                       name='Days Employed',
+    #                       xbins=dict(size=500),
+    #                       marker_color='#37AA9C',
+    #                       histnorm='percent')
+    #
+    # trace1_client = go.Scatter(x=[int(customer_df_raw['DAYS_EMPLOYED']), int(customer_df_raw['DAYS_EMPLOYED'])],
+    #                            mode="lines", y=[0, 14.5],
+    #                            line=go.scatter.Line(color="black"), name="Client's days employed")
 
     fig.append_trace(trace0, 1, 1)
-    fig.append_trace(trace1, 2, 1)
+    # fig.append_trace(trace1, 2, 1)
     fig.append_trace(trace0_client, 1, 1)
-    fig.append_trace(trace1_client, 2, 1)
+    # fig.append_trace(trace1_client, 2, 1)
 
     fig.update_layout(height=640, width=850)
 
     # Update yaxis properties
-    fig.update_yaxes(title_text="%", row=1, col=1)
-    fig.update_yaxes(title_text="%", row=2, col=1)
+    fig.update_yaxes(title_text="% population", row=1, col=1)
+    # fig.update_yaxes(title_text="%", row=2, col=1)
 
     # Update xaxis properties
-    fig.update_xaxes(title_text="â‚¬", row=1, col=1)
-    fig.update_xaxes(title_text="Days", row=2, col=1)
+    fig.update_xaxes(title_text="Credit Ammount", row=1, col=1)
+    # fig.update_xaxes(title_text="Days", row=2, col=1)
     return fig
 
 
 st.plotly_chart(plot_1())
 
-# Indicator
-st.error('Autres indicateurs :')
+# Explorer des variables
 
 mask_target1 = (df['TARGET'] == 1)
 mask_target0 = (df['TARGET'] == 0)
@@ -209,6 +231,8 @@ group_labels = ['Default', 'No Default']
 colors = ['#333F44', '#37AA9C']
 
 
+
+feature_explorer = st.selectbox('Selectionner une variable a explorer:', ['EXT_SOURCE_1', 'EXT_SOURCE_2', 'EXT_SOURCE_3'])
 # Figure Source 1
 def plot_ext_1():
     fig1 = ff.create_distplot(data_source1, group_labels,
@@ -231,10 +255,6 @@ def plot_ext_1():
 
     return fig1
 
-
-st.plotly_chart(plot_ext_1())
-
-
 # Figure Source 2
 def plot_ext_2():
     fig2 = ff.create_distplot(data_source2, group_labels,
@@ -256,10 +276,6 @@ def plot_ext_2():
 
     fig2.update_yaxes(range=[-0.1, 3.1])
     return fig2
-
-
-st.plotly_chart(plot_ext_2())
-
 
 # Figure Source 3
 def plot_ext_3():
@@ -286,4 +302,11 @@ def plot_ext_3():
     return fig3
 
 
-st.plotly_chart(plot_ext_3())
+if feature_explorer == 'EXT_SOURCE_1':
+    st.plotly_chart(plot_ext_1())
+
+if feature_explorer == 'EXT_SOURCE_2':
+    st.plotly_chart(plot_ext_2())
+
+if feature_explorer == 'EXT_SOURCE_3':
+    st.plotly_chart(plot_ext_3())
